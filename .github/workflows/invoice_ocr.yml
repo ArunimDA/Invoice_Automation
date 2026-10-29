@@ -1,0 +1,44 @@
+name: Invoice Extraction & Dynamic CFO Dashboard
+
+on:
+  repository_dispatch:
+    types: [run-invoice-ocr]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  extract-and-visualize:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install google-genai gspread google-api-python-client google-auth requests
+
+      - name: Run Pipeline (Extract & Build Google Sheet)
+        env:
+          GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          INVOICES_FOLDER_ID: ${{ secrets.INVOICES_FOLDER_ID }}
+        run: |
+          python pipeline_auto_sheets.py
+
+      - name: Trigger Make.com Webhook with Sheet Link
+        if: success()
+        run: |
+          SHEET_URL=$(python -c "import json; print(json.load(open('sheet_info.json'))['sheet_url'])")
+          COUNT=$(python -c "import json; print(json.load(open('sheet_info.json'))['processed_count'])")
+          curl -X POST "${{ secrets.MAKE_INVOICE_WEBHOOK }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\": \"success\", \"sheet_url\": \"$SHEET_URL\", \"invoices_processed\": $COUNT}"
